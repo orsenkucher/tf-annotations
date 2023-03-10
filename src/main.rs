@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use image::GenericImageView;
 use rayon::prelude::*;
 
