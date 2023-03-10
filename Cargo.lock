@@ -527,6 +527,7 @@ dependencies = [
  "anyhow",
  "csv",
  "image",
+ "rayon",
 ]
 
 [[package]]

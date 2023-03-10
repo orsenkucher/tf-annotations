@@ -3,13 +3,14 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use image::GenericImageView;
+use rayon::prelude::*;
 
 struct ObjectDetection {
-    // Path from root directory to the image.
+    // Path from root directory to the image
     filename: String,
     width: u32,
     height: u32,
-    // Directory name containing image.
+    // Directory name containing image
     class: String,
 }
 
@@ -19,7 +20,7 @@ fn main() -> Result<()> {
     let dir = &args[1];
 
     // Call the directory traversal function
-    let result: Vec<ObjectDetection> = traverse_images(dir)?;
+    let result = traverse_images(dir)?;
 
     // Export the result to a CSV file
     export(result)?;
@@ -28,44 +29,61 @@ fn main() -> Result<()> {
 }
 
 fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
-    // Initialize an empty vector to hold the image objects
-    let mut objects = Vec::new();
+    // Get a list of all directories in the root directory
+    let dirs: Vec<_> = fs::read_dir(root)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .collect();
 
-    // Traverse the root directory and its subdirectories
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        let path = entry.path();
+    // Parallelize the processing of directories using rayon
+    let result: Vec<ObjectDetection> = dirs
+        .into_par_iter()
+        .flat_map(|entry| {
+            // Get a list of all image files in the directory
+            let files = fs::read_dir(entry.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_file() && is_supported_image(&entry.path()));
 
-        // If the path is a directory, recursively traverse its contents
-        if path.is_dir() {
-            let class = path
-                .file_name()
-                .ok_or_else(|| anyhow!("Invalid path"))?
-                .to_string_lossy()
-                .to_string();
-
-            for image_entry in fs::read_dir(path)? {
-                let image_entry = image_entry?;
-                let image_path = image_entry.path();
-
-                // If the path is an image file, get its dimensions and add it to the list of objects
-                if let Some(extension) = image_path.extension() {
-                    if extension == "jpg" || extension == "jpeg" || extension == "png" {
-                        let (width, height) = image_size(&image_path);
-                        let object = ObjectDetection {
-                            filename: image_path.to_string_lossy().to_string(),
-                            width,
-                            height,
-                            class: class.clone(),
-                        };
-                        objects.push(object);
+            // Process the image files in the directory
+            let detections = files
+                .map(|entry| {
+                    let path = entry.path();
+                    let filename = path.file_name().unwrap().to_str().unwrap().to_string();
+                    let class = entry
+                        .path()
+                        .parent()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string();
+                    let (width, height) = image_size(&path);
+                    ObjectDetection {
+                        filename,
+                        width,
+                        height,
+                        class,
                     }
-                }
-            }
-        }
-    }
+                })
+                .collect::<Vec<_>>();
 
-    Ok(objects)
+            detections.into_par_iter()
+        })
+        .collect();
+
+    Ok(result)
+}
+
+fn is_supported_image<P: AsRef<Path>>(path: P) -> bool {
+    match path.as_ref().extension() {
+        Some(ext) => {
+            let ext_str = ext.to_string_lossy().to_lowercase();
+            ext_str == "jpg" || ext_str == "jpeg" || ext_str == "png" || ext_str == "bmp"
+        }
+        None => false,
+    }
 }
 
 fn export(data: Vec<ObjectDetection>) -> Result<()> {
