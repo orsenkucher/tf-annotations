@@ -135,19 +135,32 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     for object in &data {
         let base_dir = get_base_dir(&object.filename);
         let filename = get_relative_filename(&object.filename, base_dir);
+        let (xmin, ymin, xmax, ymax) = calculate_bounding_box(object.width, object.height);
         writer.write_record([
             &filename.to_string_lossy().to_string(),
             &object.width.to_string(),
             &object.height.to_string(),
             &object.class,
-            "0",
-            "0",
-            &object.width.to_string(),
-            &object.height.to_string(),
+            &xmin.to_string(),
+            &ymin.to_string(),
+            &xmax.to_string(),
+            &ymax.to_string(),
         ])?;
     }
 
     Ok(())
+}
+
+fn calculate_bounding_box(width: u32, height: u32) -> (u32, u32, u32, u32) {
+    let x_center = width / 2;
+    let y_center = height / 2;
+    let w = (width as f32 * 0.8) as u32;
+    let h = (height as f32 * 0.8) as u32;
+    let xmin = x_center - (w / 2);
+    let ymin = y_center - (h / 2);
+    let xmax = xmin + w;
+    let ymax = ymin + h;
+    (xmin, ymin, xmax, ymax)
 }
 
 fn image_size<P: AsRef<Path>>(path: P) -> Result<(u32, u32), image::ImageError> {

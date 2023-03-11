@@ -1,4 +1,4 @@
 /target
-/images
+/images*
 *.jpg
 *.csv
