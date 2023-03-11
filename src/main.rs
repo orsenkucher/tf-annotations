@@ -1,15 +1,14 @@
 use std::fs::{self, DirEntry};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use image::GenericImageView;
-use iter_tools::Itertools;
 use rayon::prelude::*;
 
+#[derive(Debug)]
 struct ObjectDetection {
     // Path from root directory to the image
-    filename: String,
+    filename: PathBuf,
     width: u32,
     height: u32,
     // Directory name containing image
@@ -38,7 +37,8 @@ fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
         .collect();
 
     // Parallelize the processing of directories using rayon
-    dirs.into_par_iter()
+    let detections: Vec<Vec<_>> = dirs
+        .into_par_iter()
         .map(|entry| {
             // Get a list of all image files in the directory
             let files = fs::read_dir(entry.path())?
@@ -49,11 +49,10 @@ fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
             let detections = files
                 .map(|entry| {
                     let path = entry.path();
-                    let filename = path.file_name().unwrap().to_str().unwrap().to_string();
-                    let class = extract_class(entry).ok_or_else(|| anyhow!("Class not found"))?;
-                    let (width, height) = image_size(&path);
+                    let class = extract_class(&entry).ok_or_else(|| anyhow!("Class not found"))?;
+                    let (width, height) = image_size(&path)?;
                     Ok(ObjectDetection {
-                        filename,
+                        filename: path,
                         width,
                         height,
                         class,
@@ -63,12 +62,22 @@ fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
 
             Ok(detections)
         })
-        .flat_map_iter(|result| std::iter::once(result).flatten_ok())
-        .collect()
+        .collect::<Result<_>>()?;
+
+    // Flatten the nested vector of detections into a single vector
+    let detections = detections.into_iter().flatten().collect::<Vec<_>>();
+
+    Ok(detections)
 }
 
-fn extract_class(entry: DirEntry) -> Option<String> {
-    Some(entry.path().parent()?.file_name()?.to_str()?.to_owned())
+fn extract_class(entry: &DirEntry) -> Option<String> {
+    entry
+        .path()
+        .parent()?
+        .file_name()?
+        .to_str()?
+        .to_owned()
+        .into()
 }
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp"];
@@ -93,9 +102,19 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     ])?;
 
     // Write the data rows
-    for object in data {
+    for object in &data {
+        let base_dir = Path::new(&object.filename)
+            .ancestors()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .nth(1)
+            .unwrap_or(Path::new(""));
+        let filename = Path::new(&object.filename)
+            .strip_prefix(base_dir)
+            .unwrap_or(Path::new(&object.filename));
         writer.write_record([
-            &object.filename,
+            &filename.to_string_lossy().to_string(),
             &object.width.to_string(),
             &object.height.to_string(),
             &object.class,
@@ -109,10 +128,10 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     Ok(())
 }
 
-fn image_size<P: AsRef<Path>>(path: P) -> (u32, u32) {
+fn image_size<P: AsRef<Path>>(path: P) -> Result<(u32, u32), image::ImageError> {
     // Open the image file and decode it using the image crate
-    let img = image::open(path).unwrap();
+    let img = image::open(path)?;
 
     // Get the dimensions of the image and return them
-    img.dimensions()
+    Ok(img.dimensions())
 }
