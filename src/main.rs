@@ -1,5 +1,6 @@
 use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use image::GenericImageView;
@@ -20,11 +21,27 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let dir = args.get(1).map_or("images", |s| s);
 
-    // Call the directory traversal function
+    // Measure the execution time of the directory traversal
+    let start_time = Instant::now();
     let result = traverse_images(dir)?;
+    let elapsed_time = start_time.elapsed();
 
     // Export the result to a CSV file
+    let export_start_time = Instant::now();
     export(result)?;
+    let export_elapsed_time = export_start_time.elapsed();
+
+    // Print the execution times
+    println!(
+        "Traversal time: {}.{:03}s",
+        elapsed_time.as_secs(),
+        elapsed_time.subsec_millis()
+    );
+    println!(
+        "Export time: {}.{:03}s",
+        export_elapsed_time.as_secs(),
+        export_elapsed_time.subsec_millis()
+    );
 
     Ok(())
 }
