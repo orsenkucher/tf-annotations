@@ -135,7 +135,7 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     for object in &data {
         let base_dir = get_base_dir(&object.filename);
         let filename = get_relative_filename(&object.filename, base_dir);
-        let (xmin, ymin, xmax, ymax) = calculate_bounding_box(object.width, object.height);
+        let (xmin, ymin, xmax, ymax) = calculate_bounding_box::<80>(object.width, object.height);
         writer.write_record([
             &filename.to_string_lossy().to_string(),
             &object.width.to_string(),
@@ -151,11 +151,11 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     Ok(())
 }
 
-fn calculate_bounding_box(width: u32, height: u32) -> (u32, u32, u32, u32) {
+fn calculate_bounding_box<const PERCENT: u32>(width: u32, height: u32) -> (u32, u32, u32, u32) {
     let x_center = width / 2;
     let y_center = height / 2;
-    let w = (width as f32 * 0.8) as u32;
-    let h = (height as f32 * 0.8) as u32;
+    let w = (width as f32 * (PERCENT as f32 / 100.0)) as u32;
+    let h = (height as f32 * (PERCENT as f32 / 100.0)) as u32;
     let xmin = x_center - (w / 2);
     let ymin = y_center - (h / 2);
     let xmax = xmin + w;
