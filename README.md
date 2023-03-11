@@ -8,7 +8,7 @@ This program requires the Rust programming language to be installed on your syst
 To use this program, run the following command in your terminal:
 
 ```
-cargo run <directory_path>
+cargo run --release -- <directory_path>
 ```
 Replace <directory_path> with the path to the directory containing the image files you want to process.
 

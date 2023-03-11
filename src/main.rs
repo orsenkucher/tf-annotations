@@ -1,8 +1,10 @@
-use std::fs;
+use std::fs::{self, DirEntry};
 use std::path::Path;
 
+use anyhow::anyhow;
 use anyhow::Result;
 use image::GenericImageView;
+use iter_tools::Itertools;
 use rayon::prelude::*;
 
 struct ObjectDetection {
@@ -17,7 +19,7 @@ struct ObjectDetection {
 fn main() -> Result<()> {
     // Get the path to the image file from the command-line arguments
     let args: Vec<String> = std::env::args().collect();
-    let dir = &args[1];
+    let dir = args.get(1).map_or("images", |s| s);
 
     // Call the directory traversal function
     let result = traverse_images(dir)?;
@@ -36,51 +38,46 @@ fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
         .collect();
 
     // Parallelize the processing of directories using rayon
-    let result: Vec<ObjectDetection> = dirs
-        .into_par_iter()
-        .flat_map(|entry| {
+    dirs.into_par_iter()
+        .map(|entry| {
             // Get a list of all image files in the directory
-            let files = fs::read_dir(entry.path())
-                .unwrap()
+            let files = fs::read_dir(entry.path())?
                 .filter_map(Result::ok)
-                .filter(|entry| entry.path().is_file() && is_supported_image(&entry.path()));
+                .filter(|entry| entry.path().is_file() && is_supported_image(entry.path()));
 
             // Process the image files in the directory
             let detections = files
                 .map(|entry| {
                     let path = entry.path();
                     let filename = path.file_name().unwrap().to_str().unwrap().to_string();
-                    let class = entry
-                        .path()
-                        .parent()
-                        .unwrap()
-                        .file_name()
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .to_string();
+                    let class = extract_class(entry).ok_or_else(|| anyhow!("Class not found"))?;
                     let (width, height) = image_size(&path);
-                    ObjectDetection {
+                    Ok(ObjectDetection {
                         filename,
                         width,
                         height,
                         class,
-                    }
+                    })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
 
-            detections.into_par_iter()
+            Ok(detections)
         })
-        .collect();
-
-    Ok(result)
+        .flat_map_iter(|result| std::iter::once(result).flatten_ok())
+        .collect()
 }
+
+fn extract_class(entry: DirEntry) -> Option<String> {
+    Some(entry.path().parent()?.file_name()?.to_str()?.to_owned())
+}
+
+const SUPPORTED_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp"];
 
 fn is_supported_image<P: AsRef<Path>>(path: P) -> bool {
     match path.as_ref().extension() {
         Some(ext) => {
             let ext_str = ext.to_string_lossy().to_lowercase();
-            ext_str == "jpg" || ext_str == "jpeg" || ext_str == "png" || ext_str == "bmp"
+            SUPPORTED_EXTENSIONS.contains(&ext_str.as_str())
         }
         None => false,
     }
@@ -91,13 +88,13 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     let mut writer = csv::Writer::from_path("tensorflow.csv")?;
 
     // Write the header row
-    writer.write_record(&[
+    writer.write_record([
         "filename", "width", "height", "class", "xmin", "ymin", "xmax", "ymax",
     ])?;
 
     // Write the data rows
     for object in data {
-        writer.write_record(&[
+        writer.write_record([
             &object.filename,
             &object.width.to_string(),
             &object.height.to_string(),
