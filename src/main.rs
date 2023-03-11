@@ -92,6 +92,19 @@ fn is_supported_image<P: AsRef<Path>>(path: P) -> bool {
     }
 }
 
+fn get_base_dir(filename: &PathBuf) -> &Path {
+    Path::new(filename)
+        .ancestors()
+        .nth(1)
+        .unwrap_or(Path::new(""))
+}
+
+fn get_relative_filename<'a>(filename: &'a PathBuf, base_dir: &Path) -> &'a Path {
+    Path::new(filename)
+        .strip_prefix(base_dir)
+        .unwrap_or(Path::new(filename))
+}
+
 fn export(data: Vec<ObjectDetection>) -> Result<()> {
     // Open the CSV file for writing
     let mut writer = csv::Writer::from_path("tensorflow.csv")?;
@@ -103,16 +116,8 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
 
     // Write the data rows
     for object in &data {
-        let base_dir = Path::new(&object.filename)
-            .ancestors()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .nth(1)
-            .unwrap_or(Path::new(""));
-        let filename = Path::new(&object.filename)
-            .strip_prefix(base_dir)
-            .unwrap_or(Path::new(&object.filename));
+        let base_dir = get_base_dir(&object.filename);
+        let filename = get_relative_filename(&object.filename, base_dir);
         writer.write_record([
             &filename.to_string_lossy().to_string(),
             &object.width.to_string(),
