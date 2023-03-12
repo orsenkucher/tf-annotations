@@ -4,7 +4,9 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use image::GenericImageView;
+use iter_tools::Itertools;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 struct ObjectDetection {
@@ -16,10 +18,26 @@ struct ObjectDetection {
     class: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct LabelClassification {
+    tanks: LabelGroup,
+    lavs: LabelGroup,
+    unknown_military: LabelGroup,
+}
+#[derive(Debug, Serialize, Deserialize)]
+struct LabelGroup {
+    class: String,
+    labels: Vec<String>,
+}
+
 fn main() -> Result<()> {
     // Get the path to the image file from the command-line arguments
     let args: Vec<String> = std::env::args().collect();
     let dir = args.get(1).map_or("images", |s| s);
+
+    let toml_str = include_str!("../label_classification.toml");
+    let classifier: LabelClassification = toml::from_str(toml_str)?;
+    println!("{:#?}", classifier);
 
     // Measure the execution time of the directory traversal
     let start_time = Instant::now();
@@ -28,8 +46,10 @@ fn main() -> Result<()> {
 
     // Export the result to a CSV file
     let export_start_time = Instant::now();
-    export(result)?;
+    export(&result, &classifier)?;
     let export_elapsed_time = export_start_time.elapsed();
+
+    print_unique_classes(&result);
 
     // Print the execution times
     println!(
@@ -122,7 +142,28 @@ fn get_relative_filename<'a>(filename: &'a PathBuf, base_dir: &Path) -> &'a Path
         .unwrap_or(Path::new(filename))
 }
 
-fn export(data: Vec<ObjectDetection>) -> Result<()> {
+fn print_unique_classes(data: &[ObjectDetection]) {
+    let classes: Vec<_> = data
+        .iter()
+        .map(|detection| &detection.class)
+        .unique()
+        .collect();
+    println!("Unique classes: {:?}", classes);
+    println!("Unique len: {:?}", classes.len());
+}
+
+impl LabelClassification {
+    fn get_class(&self, label: &str) -> Option<&str> {
+        for group in [&self.tanks, &self.lavs, &self.unknown_military].iter() {
+            if group.labels.contains(&label.to_owned()) {
+                return Some(&group.class);
+            }
+        }
+        None
+    }
+}
+
+fn export(data: &[ObjectDetection], classifier: &LabelClassification) -> Result<()> {
     // Open the CSV file for writing
     let mut writer = csv::Writer::from_path("tensorflow.csv")?;
 
@@ -132,15 +173,18 @@ fn export(data: Vec<ObjectDetection>) -> Result<()> {
     ])?;
 
     // Write the data rows
-    for object in &data {
+    for object in data {
         let base_dir = get_base_dir(&object.filename);
         let filename = get_relative_filename(&object.filename, base_dir);
         let (xmin, ymin, xmax, ymax) = calculate_bounding_box::<80>(object.width, object.height);
+
+        let class = classifier.get_class(&object.class).unwrap_or("unknown");
+
         writer.write_record([
             &filename.to_string_lossy().to_string(),
             &object.width.to_string(),
             &object.height.to_string(),
-            &object.class,
+            &class.to_owned(),
             &xmin.to_string(),
             &ymin.to_string(),
             &xmax.to_string(),
@@ -169,4 +213,23 @@ fn image_size<P: AsRef<Path>>(path: P) -> Result<(u32, u32), image::ImageError> 
 
     // Get the dimensions of the image and return them
     Ok(img.dimensions())
+}
+
+fn find_intersection<T: PartialEq + Clone>(vec1: &[T], vec2: &[T]) -> Vec<T> {
+    vec1.iter().filter(|&n| vec2.contains(n)).cloned().collect()
+}
+
+fn has_duplicates<T: Eq + std::hash::Hash>(vec: &[T]) -> Option<Vec<&T>> {
+    let mut set = std::collections::HashSet::new();
+    let mut duplicates = std::collections::HashSet::new();
+    for item in vec.iter() {
+        if !set.insert(item) {
+            duplicates.insert(item);
+        }
+    }
+    if duplicates.is_empty() {
+        None
+    } else {
+        Some(duplicates.into_iter().collect())
+    }
 }
