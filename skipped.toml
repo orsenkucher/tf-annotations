@@ -1,0 +1,10 @@
+
+skipped = [
+  "gl5",                          # trash
+  "nkpz",                         # trash
+  "tank_technology_demonstrator", # trash
+
+  "bmpt",  # armored fighting vehicle
+  "drozd", # Active Protection Systems
+  "tusk",  # upgrade kit
+]

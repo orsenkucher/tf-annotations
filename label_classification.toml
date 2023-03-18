@@ -1,15 +1,16 @@
 [tanks]
-class = "tanks"
+class = "heavy_tank"
 description = "Tanks"
 labels = [
-  "type_99",
-  "t80b",
-  "m2002",
-  "oplot_m",
-  "al_khalid",
-  "vickers_mk3",
-  "chieftain",
-  "t55",
+  "type_99",     # Heavy Main Battle Tank
+  "t80b",        # Heavy Main Battle Tank
+  "m2002",       # Heavy Main Battle Tank
+  "oplot_m",     # Heavy Main Battle Tank
+  "al_khalid",   # mbt heavy
+  "vickers_mk3", # mbt medium
+  "chieftain",   # mbt medium
+  "t55",         # Soviet medium 
+
   "sabalan",
   "type_62",
   "t64e",
@@ -19,6 +20,7 @@ labels = [
   "vickers_mk7",
   "t72b4",
   "ruag_leopard_upgrade",
+
   "k21_with_xc8",
   "leopard_c2",
   "m551_sheridan",
@@ -74,7 +76,6 @@ labels = [
   "merkava_mk3",
   "sk105_kurassier",
   "t80um1_bars",
-  "k21_105",
   "type_96",
   "m1a2_sep",
   "type_74",
@@ -98,6 +99,8 @@ labels = [
 class = "lavs"
 description = "Light armored vehicles"
 labels = [
+  "k21_105", # South Korean infantry fighting vehicle and is not a tank
+
   "sabra",
   "t55_enigma",
   "vt5",

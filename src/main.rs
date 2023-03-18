@@ -22,8 +22,8 @@ struct ObjectDetection {
 struct LabelClassification {
     tanks: LabelGroup,
     lavs: LabelGroup,
-    unknown_military: LabelGroup,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 struct LabelGroup {
     class: String,
@@ -35,7 +35,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let dir = args.get(1).map_or("images", |s| s);
 
-    let toml_str = include_str!("../label_classification.toml");
+    let toml_str = include_str!("../label_classification2.toml");
     let classifier: LabelClassification = toml::from_str(toml_str)?;
     println!("{:#?}", classifier);
 
@@ -154,7 +154,8 @@ fn print_unique_classes(data: &[ObjectDetection]) {
 
 impl LabelClassification {
     fn get_class(&self, label: &str) -> Option<&str> {
-        for group in [&self.tanks, &self.lavs, &self.unknown_military].iter() {
+        // TODO: fix harcoding of [&self.tanks, &self.lavs] fields
+        for group in [&self.tanks, &self.lavs].iter() {
             if group.labels.contains(&label.to_owned()) {
                 return Some(&group.class);
             }
@@ -178,18 +179,20 @@ fn export(data: &[ObjectDetection], classifier: &LabelClassification) -> Result<
         let filename = get_relative_filename(&object.filename, base_dir);
         let (xmin, ymin, xmax, ymax) = calculate_bounding_box::<80>(object.width, object.height);
 
-        let class = classifier.get_class(&object.class).unwrap_or("unknown");
-
-        writer.write_record([
-            &filename.to_string_lossy().to_string(),
-            &object.width.to_string(),
-            &object.height.to_string(),
-            &class.to_owned(),
-            &xmin.to_string(),
-            &ymin.to_string(),
-            &xmax.to_string(),
-            &ymax.to_string(),
-        ])?;
+        if let Some(class) = classifier.get_class(&object.class) {
+            writer.write_record([
+                &filename.to_string_lossy().to_string(),
+                &object.width.to_string(),
+                &object.height.to_string(),
+                &class.to_owned(),
+                &xmin.to_string(),
+                &ymin.to_string(),
+                &xmax.to_string(),
+                &ymax.to_string(),
+            ])?;
+        } else {
+            println!("Skipping: {}", &object.class)
+        }
     }
 
     Ok(())
