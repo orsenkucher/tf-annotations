@@ -10,6 +10,8 @@ anyhow = "1.0.69"
 csv = "1.2.1"
 image = "0.24.5"
 iter_tools = "0.1.4"
+itertools = "0.10.5"
 rayon = "1.7.0"
 serde = { version = "1.0.155", features = ["derive", "rc"] }
+structopt = "0.3.26"
 toml = "0.7.2"

@@ -1,92 +1,93 @@
-use std::fs::{self, DirEntry};
+use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use image::GenericImageView;
-use iter_tools::Itertools;
+use itertools::Itertools;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use structopt::StructOpt;
 
-#[derive(Debug)]
-struct ObjectDetection {
-    // Path from root directory to the image
-    filename: PathBuf,
-    width: u32,
-    height: u32,
-    // Directory name containing image
-    class: String,
-}
+const IMAGES_DIR: &str = "images";
+const CSV_FILE: &str = "tensorflow.csv";
 
+/// A struct representing the label classification configuration, containing a vector of LabelGroup.
 #[derive(Debug, Serialize, Deserialize)]
 struct LabelClassification {
-    tanks: LabelGroup,
-    lavs: LabelGroup,
+    groups: Vec<LabelGroup>,
 }
 
+/// LabelGroup: A struct representing a group of labels, containing the class
+/// name and a vector of label strings.
 #[derive(Debug, Serialize, Deserialize)]
 struct LabelGroup {
     class: String,
+    description: String,
     labels: Vec<String>,
 }
 
+#[derive(Debug, StructOpt)]
+struct Cli {
+    #[structopt(short, long, default_value = IMAGES_DIR)]
+    dir: String,
+}
+
+/// A struct representing an object detection, containing the image file path,
+/// dimensions, and class.
+#[derive(Debug)]
+struct ObjectDetection {
+    filename: PathBuf,
+    width: u32,
+    height: u32,
+    class: String,
+}
+
+/// The entry point of the program, responsible for reading the configuration,
+/// traversing the images, exporting results, and printing execution times.
 fn main() -> Result<()> {
-    // Get the path to the image file from the command-line arguments
-    let args: Vec<String> = std::env::args().collect();
-    let dir = args.get(1).map_or("images", |s| s);
+    let args = Cli::from_args();
+    let dir = &args.dir;
 
     let toml_str = include_str!("../label_classification2.toml");
     let classifier: LabelClassification = toml::from_str(toml_str)?;
-    println!("{:#?}", classifier);
 
-    // Measure the execution time of the directory traversal
     let start_time = Instant::now();
     let result = traverse_images(dir)?;
     let elapsed_time = start_time.elapsed();
 
-    // Export the result to a CSV file
     let export_start_time = Instant::now();
     export(&result, &classifier)?;
     let export_elapsed_time = export_start_time.elapsed();
 
     print_unique_classes(&result);
 
-    // Print the execution times
-    println!(
-        "Traversal time: {}.{:03}s",
-        elapsed_time.as_secs(),
-        elapsed_time.subsec_millis()
-    );
-    println!(
-        "Export time: {}.{:03}s",
-        export_elapsed_time.as_secs(),
-        export_elapsed_time.subsec_millis()
-    );
+    println!("Traversal time: {}ms", elapsed_time.as_millis());
+    println!("Export time: {}ms", export_elapsed_time.as_millis());
 
     Ok(())
 }
 
-fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
-    // Get a list of all directories in the root directory
-    let dirs: Vec<_> = fs::read_dir(root)?
+/// Traverses the images in the given directory, returning a vector of
+/// ObjectDetection instances.
+fn traverse_images(dir: &str) -> Result<Vec<ObjectDetection>> {
+    let dirs: Vec<_> = std::fs::read_dir(dir)?
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
         .collect();
 
-    // Parallelize the processing of directories using rayon
     let detections: Vec<Vec<_>> = dirs
         .into_par_iter()
         .map(|entry| {
-            // Get a list of all image files in the directory
-            let files = fs::read_dir(entry.path())?
+            let files = std::fs::read_dir(entry.path())?
                 .filter_map(Result::ok)
-                .filter(|entry| entry.path().is_file() && is_supported_image(entry.path()));
+                .filter(|entry| is_supported_image(entry.path()));
 
-            // Process the image files in the directory
             let detections = files
                 .map(|entry| {
                     let path = entry.path();
-                    let class = extract_class(&entry).ok_or_else(|| anyhow!("Class not found"))?;
+                    let class = extract_class(&entry)
+                        .ok_or_else(|| anyhow!("Class not found for {:?}", entry.path()))?;
                     let (width, height) = image_size(&path)?;
                     Ok(ObjectDetection {
                         filename: path,
@@ -101,47 +102,44 @@ fn traverse_images<P: AsRef<Path>>(root: P) -> Result<Vec<ObjectDetection>> {
         })
         .collect::<Result<_>>()?;
 
-    // Flatten the nested vector of detections into a single vector
-    let detections = detections.into_iter().flatten().collect::<Vec<_>>();
-
-    Ok(detections)
+    Ok(detections.into_iter().flatten().collect())
 }
 
+/// Extracts the class name from the given directory entry.
 fn extract_class(entry: &DirEntry) -> Option<String> {
     entry
         .path()
         .parent()?
         .file_name()?
-        .to_str()?
-        .to_owned()
-        .into()
+        .to_str()
+        .map(str::to_owned)
 }
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "bmp"];
 
+/// Checks if the given path points to a supported image file format.
 fn is_supported_image<P: AsRef<Path>>(path: P) -> bool {
-    match path.as_ref().extension() {
-        Some(ext) => {
-            let ext_str = ext.to_string_lossy().to_lowercase();
-            SUPPORTED_EXTENSIONS.contains(&ext_str.as_str())
-        }
-        None => false,
-    }
+    path.as_ref()
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_lowercase)
+        .map(|ext_str| SUPPORTED_EXTENSIONS.contains(&ext_str.as_str()))
+        .unwrap_or(false)
 }
 
-fn get_base_dir(filename: &PathBuf) -> &Path {
-    Path::new(filename)
-        .ancestors()
-        .nth(1)
-        .unwrap_or(Path::new(""))
+/// Returns the base directory of the given path.
+fn get_base_dir(filename: &Path) -> &Path {
+    filename.ancestors().nth(1).unwrap_or(Path::new(""))
 }
 
+/// Returns the relative filename of the given path relative to the base directory.
 fn get_relative_filename<'a>(filename: &'a PathBuf, base_dir: &Path) -> &'a Path {
-    Path::new(filename)
+    filename
         .strip_prefix(base_dir)
         .unwrap_or(Path::new(filename))
 }
 
+/// Prints the unique classes found in the given vector of ObjectDetection instances.
 fn print_unique_classes(data: &[ObjectDetection]) {
     let classes: Vec<_> = data
         .iter()
@@ -153,27 +151,25 @@ fn print_unique_classes(data: &[ObjectDetection]) {
 }
 
 impl LabelClassification {
+    /// Returns the class name associated with the given label
+    /// from the LabelClassification instance.
     fn get_class(&self, label: &str) -> Option<&str> {
-        // TODO: fix harcoding of [&self.tanks, &self.lavs] fields
-        for group in [&self.tanks, &self.lavs].iter() {
-            if group.labels.contains(&label.to_owned()) {
-                return Some(&group.class);
-            }
-        }
-        None
+        self.groups
+            .iter()
+            .find(|group| group.labels.contains(&label.to_owned()))
+            .map(|group| group.class.as_str())
     }
 }
 
+/// Exports the object detection data to a CSV file, using the given
+/// LabelClassification instance for label classification.
 fn export(data: &[ObjectDetection], classifier: &LabelClassification) -> Result<()> {
-    // Open the CSV file for writing
-    let mut writer = csv::Writer::from_path("tensorflow.csv")?;
+    let mut writer = csv::Writer::from_path(CSV_FILE)?;
 
-    // Write the header row
     writer.write_record([
         "filename", "width", "height", "class", "xmin", "ymin", "xmax", "ymax",
     ])?;
 
-    // Write the data rows
     for object in data {
         let base_dir = get_base_dir(&object.filename);
         let filename = get_relative_filename(&object.filename, base_dir);
@@ -198,6 +194,7 @@ fn export(data: &[ObjectDetection], classifier: &LabelClassification) -> Result<
     Ok(())
 }
 
+/// Calculates the bounding box for the given image dimensions and percentage.
 fn calculate_bounding_box<const PERCENT: u32>(width: u32, height: u32) -> (u32, u32, u32, u32) {
     let x_center = width / 2;
     let y_center = height / 2;
@@ -210,29 +207,8 @@ fn calculate_bounding_box<const PERCENT: u32>(width: u32, height: u32) -> (u32, 
     (xmin, ymin, xmax, ymax)
 }
 
-fn image_size<P: AsRef<Path>>(path: P) -> Result<(u32, u32), image::ImageError> {
-    // Open the image file and decode it using the image crate
+/// Returns the dimensions (width and height) of the given image file.
+fn image_size(path: &Path) -> Result<(u32, u32), image::ImageError> {
     let img = image::open(path)?;
-
-    // Get the dimensions of the image and return them
     Ok(img.dimensions())
-}
-
-fn find_intersection<T: PartialEq + Clone>(vec1: &[T], vec2: &[T]) -> Vec<T> {
-    vec1.iter().filter(|&n| vec2.contains(n)).cloned().collect()
-}
-
-fn has_duplicates<T: Eq + std::hash::Hash>(vec: &[T]) -> Option<Vec<&T>> {
-    let mut set = std::collections::HashSet::new();
-    let mut duplicates = std::collections::HashSet::new();
-    for item in vec.iter() {
-        if !set.insert(item) {
-            duplicates.insert(item);
-        }
-    }
-    if duplicates.is_empty() {
-        None
-    } else {
-        Some(duplicates.into_iter().collect())
-    }
 }

@@ -1,5 +1,5 @@
-# Main Battle Tanks (MBTs)
-[tanks]
+
+[[groups]]
 class = "main_battle_tank"
 description = "Main Battle Tanks (MBTs)"
 labels = [
@@ -120,8 +120,7 @@ labels = [
   "olifant_mk1b",
 ]
 
-#Light Tanks/Armored Vehicles
-[lavs]
+[[groups]]
 class = "light_armored_vehicle"
 description = "Light Tanks/Armored Vehicles"
 labels = [
